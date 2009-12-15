@@ -11,8 +11,10 @@ fi
 
 device_addr=$1
 own_name=$(basename $0)
-dir=$(mkdir)/mnt/$device_addr
+basedir=${basedir:-/mnt}
+dir=${basedir}/$device_addr
 browser=${browser:-"xdg-open"}
+
 count=0
 
 # Check for kdialog
