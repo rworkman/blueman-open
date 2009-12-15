@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/bin/sh
+
+DEBUG=${DEBUG:-""}
 
 phone_addr=$1
 own_name=$(basename $0)
@@ -7,32 +9,30 @@ browser=${browser:-"xdg-open"}
 
 # Check for kdialog
 
-if which kdialog &>/dev/null; then
-    messagetype="kdialog2"
+if which kdialog 1>/dev/null 2>/dev/null; then
+    messagetype="kdialog"
 else
     messagetype="gtkdialog"
 fi
 
-# gtkdialog stuff
-
-function gtkbox1() {
+# Abstract some stuff for gtkdialog
+gtkbox_passive() {
   export messagebox='
     <vbox>
     <frame Blueman Open Device.>
       <text>
-	<label>"'`echo $1`'"</label>
+	<label>"'$(printf $1)'"</label>
       </text>
     </frame>
     </vbox>
     '
 }
-
-function gtkbox2() {
+gtkbox_interactive() {
   export messagebox='
     <vbox>
     <frame Blueman Open Device.>
       <text>
-	<label>"'`echo $1`'"</label>
+	<label>"'$(printf $1)'"</label>
       </text>
       <hbox>
 	<button ok></button>
@@ -41,101 +41,102 @@ function gtkbox2() {
     </vbox>
     '
 }
-function gtkmessage() {
+gtkmessage() {
 	I=$IFS; IFS=""
-	for STATEMENT in  $(gtkdialog --center --program=messagebox); do
+	for STATEMENT in $(gtkdialog --center --program=messagebox); do
 		eval $STATEMENT
 	done
 	IFS=$I
 }
+# End gtkdialog abstraction
 
-#mount function
-
+# mount function
 mount_phone ()
 {
   i=0
   LIMIT=5
   while [ $i -lt $LIMIT ]
   do
-
     printf "$i "
-    logger -i -t $own_name "Perform $i try to mount phone $phone_addr to $dir using obexfs"
-    logger -i -t $own_name "Execute: obexfs -b $phone_addr -B 10 $dir"
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Perform $i try to mount phone $phone_addr to $dir using obexfs"
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Execute: obexfs -b $phone_addr -B 10 $dir"
     out=$(obexfs -b $phone_addr $dir 2>&1)
-    logger -i -t $own_name "$out"
+    [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
     mounts=$(grep $dir /proc/mounts | wc -l)
-    logger -i -t $own_name "Found $mounts mounted $dir inside /proc/mounts"
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Found $mounts mounted $dir inside /proc/mounts"
     
     if [ $mounts -ne 0 ] ;then
       progress=99
+      MSG_TXT="Successfully mounted $phone_addr to $dir"
       if [ $messagetype == "kdialog" ]; then
-	kdialog --passivepopup "Successfully mounted $phone_addr to $dir" 2
-      else
-	gtkbox2 $"Successfully mounted $phone_addr to $dir"
+	kdialog --passivepopup "$MSG_TXT" 2
+      elif [ $messagetype == "gtkdialog" ]; then
+	gtkbox_interactive $"$MSG_TXT"
 	gtkmessage
       fi
-      logger -i -t $own_name "Open $dir with $browser"
+      [ ! -z $DEBUG ] && logger -i -t $own_name "Open $dir with $browser"
       out=$($browser $dir 2>&1)
-      logger -i -t $own_name "$out"
+      [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
       exit 0
     else
-      logger -i -t $own_name "Failed to mount $phone_addr to $dir from the $i try"
+      logger -i -t $own_name "Failed to mount $phone_addr to $dir from try $i "
     fi
     sleep 1
     ((i += 1))
   done
   if [ $mounts -eq 0 ] ;then
+    MSG_TXT="Failed to mount $phone_addr to $dir.\nCheck /var/log/messages for errors."
     if [ $messagetype == "kdialog" ]; then
-      kdialog --passivepopup "Failed to mount $phone_addr to $dir.\nCheck /var/log/messages for errors." 4
-    else
-      gtkbox2 $"Failed to mount $phone_addr to $dir. Check /var/log/messages for errors."
+      kdialog --passivepopup "$MSG_TXT" 4
+    elif [ $messagetype == "gtkdialog" ]; then
+      gtkbox_interactive $"$MSG_TXT"
       gtkmessage
     fi
     killall gtkdialog
   fi
 }
 
-#unmount function
-
+# unmount function
 umount_phone ()
 {
   mounts=$(grep $dir /proc/mounts | wc -l)
   if [ $mounts -ne 0 ] ;then
-    logger -i -t $own_name "Perform umount of $dir if it's already mounted."
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Perform umount of $dir if it's already mounted."
     out=$(fusermount -uz $dir 2>&1)
-    logger -i -t $own_name "$out"
+    [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
     mounts=$(cat /proc/mounts |grep $dir|wc -l)
       if [ $mounts -eq 0 ] ;then
-        logger -i -t $own_name "Successfully unmounted $dir."
+        [ ! -z $DEBUG ] && logger -i -t $own_name "Successfully unmounted $dir."
       else
         logger -i -t $own_name "$dir is already mounted.  Failed to umount $dir.$out.  Please perform its umount manually."
+        MSG_TXT="Failed to umount $dir - check /var/log/messages for errors"
 	if [ $messagetype == "kdialog" ]; then
-	  kdialog --passivepopup "Failed to umount $dir - check /var/log/messages for errors" 4
-	else
-	  gtkbox2 $"Failed to umount $dir - check /var/log/messages for errors"
+	  kdialog --passivepopup "$MSG_TXT" 4
+	elif [ $messagetype == "gtkdialog" ]; then
+	  gtkbox_interactive $"$MSG_TXT"
 	  gtkmessage
 	fi
         exit
       fi
   else
-    logger -i -t $own_name "$dir is not mounted - no need to perform umount..."
+    [ ! -z $DEBUG ] && logger -i -t $own_name "$dir is not mounted - no need to perform umount..."
   fi
 }
 
-#mkdir function
-
+# mkdir function
 create_dir ()
 {
   progress=1
-  logger -i -t $own_name "Create directory $dir to mount the phone by bluetooth..."
+  [ ! -z $DEBUG ] && logger -i -t $own_name "Create directory $dir to mount the phone by bluetooth..."
   out=$(mkdir -p $dir 2>&1)
-  logger -i -t $own_name "$out"
+  [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
 }
 
+MSG_TXT="Mount phone is in progress... Please wait..."
 if [ $messagetype == "kdialog" ]; then
-  kdialog --passivepopup "Mount phone is in progress... Please wait..." 4	
-else
-  gtkbox1 $"Mount phone is in progress... Please wait..."
+  kdialog --passivepopup "$MSG_TXT" 4
+elif [ $messagetype == "gtkdialog" ]; then
+  gtkbox_passive $"$MSG_TXT"
   gtkmessage&
 fi
 
