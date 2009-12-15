@@ -1,0 +1,74 @@
+#!/bin/bash
+phone_addr=$1
+own_name=`basename $0`
+dir=/tmp/$phone_addr
+
+
+mount_phone ()
+{
+i=0
+LIMIT=5
+while [ "$i" -lt "$LIMIT" ]
+do
+  echo -n "$i "
+  logger -i -t $own_name "Perform $i try to mount phone $phone_addr to $dir using obexfs"
+  logger -i -t $own_name "Execute: obexfs -b $phone_addr -B 10 $dir"
+  out=`obexfs -b $phone_addr $dir 2>&1`
+  logger -i -t $own_name "$out"
+  mounts=`cat /proc/mounts |grep $dir|wc -l `
+  logger -i -t $own_name "Found $mounts mounted $dir inside /proc/mounts"
+  
+  if [ $mounts -ne 0 ] ;then
+  kdialog --passivepopup "Successfully mounted $phone_addr to $dir" 2
+  logger -i -t $own_name "Open $dir inside konqueror"
+  out=`konqueror $dir 2>&1`
+  logger -i -t $own_name "$out"
+  exit 0
+  else
+   logger -i -t $own_name "Failed to mount $phone_addr to $dir from the $i try"
+  fi
+  sleep1
+  ((i += 1))
+done
+if [ $mounts -eq 0 ] ;then
+kdialog --passivepopup "Failed to mount $phone_addr to $dir.\nChech /var/log/messages for errors" 4
+fi
+
+}
+
+umount_phone ()
+{
+mounts=`cat /proc/mounts |grep $dir|wc -l `
+if [ $mounts -ne 0 ] ;then
+logger -i -t $own_name "Perform umount of $dir if it's already mounted"
+out=`fusermount -uz $dir 2>&1`
+logger -i -t $own_name "$out"
+mounts=`cat /proc/mounts |grep $dir|wc -l `
+  if [ $mounts -eq 0 ] ;then
+  logger -i -t $own_name "Successfully umounted $dir"
+  else
+  logger -i -t $own_name "$dir is already mounted.Failed to umount $dir.$out.Please perform it's umount manually"	
+  kdialog --passivepopup "Failed to umount $dir.Chech /var/log/messages for errors" 4
+  exit
+  fi
+else
+logger -i -t $own_name "$dir is not mounted.No need to perform umount"
+fi
+}
+
+create_dir ()
+{
+logger -i -t $own_name "Create directory $dir to mount the phone by bluetooth"
+out=`mkdir -p $dir 2>&1`
+logger -i -t $own_name "$out"
+}
+
+
+kdialog --passivepopup "Mount phone is in progress...Please wait" 4
+create_dir
+umount_phone
+mount_phone
+
+
+
+
