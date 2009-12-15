@@ -1,0 +1,8 @@
+This (small) project is a modified version of the script found at
+http://www.kde-apps.org/content/show.php/kde4+bluetooth+files+open?content=108869
+
+The goal is to fix it up to work seamlessly in Xfce inside Slackware
+and (hopefully) merge the changes back upstream.
+
+Robby Workman and Zarren Spry
+
