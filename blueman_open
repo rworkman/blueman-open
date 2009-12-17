@@ -14,6 +14,11 @@ own_name=$(basename $0)
 basedir=${basedir:-/mnt}
 dir=${basedir}/$device_addr
 browser=${browser:-"xdg-open"}
+cleanup_script="#!/bin/bash\n
+#cleanup bluetooth mount directories on shutdown / restart\n\n\
+fusermount -uz $dir\n
+rm -rf $dir\nrm /etc/rc.d/rc0.d/$device_addr-cleanup.sh 1>/dev/null 2>/dev/null\n&\
+rm /etc/rc.d/rc6.d/$device_addr-cleanup.sh 1>/dev/null 2>/dev/null"
 
 count=0
 
@@ -29,6 +34,17 @@ else
     touch $m_file
     echo "0" > $p_file 
 fi
+
+# fix broken pipe when unexpected error occurs
+
+trap killscript INT
+
+killscript()
+{
+    echo "Initializing clean shutdown......"
+    echo "100" > $p_file # kill gtk window
+    exit 0 # kill script
+}
 
 #gtkdialog abstraction
 
@@ -114,6 +130,10 @@ mount_device ()
       [ ! -z $DEBUG ] && logger -i -t $own_name "Open $dir with $browser"
       out=$($browser $dir 2>&1)
       [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
+      # setup cleanup script
+      echo -e $cleanup_script > /etc/rc.d/rc0.d/$device_addr-cleanup.sh
+      chmod +x /etc/rc.d/rc0.d/$device_addr-cleanup.sh
+      ln -s /etc/rc.d/rc0.d/$device_addr-cleanup.sh /etc/rc.d/rc6.d/$device_addr-cleanup.sh
       exit 0
     else
       logger -i -t $own_name "Failed to mount $device_addr to $dir from try $i "
