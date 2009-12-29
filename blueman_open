@@ -16,7 +16,7 @@ fi
 device_addr=$1
 device_name=$(hcitool name $device_addr)
 own_name=$(basename $0)
-basedir=${basedir:-/root/.gvfs}
+basedir=${basedir:-$HOME/.gvfs}
 dir=${basedir}
 browser=${browser:-"xdg-open"}
 progress_bar_counter=0
