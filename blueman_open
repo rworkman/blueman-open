@@ -1,8 +1,12 @@
 #!/bin/sh
+# Blueman Mount Script for Slackware
+# by Zarren Spry & Robby Workman
+
+
 
 # varables
 
-DEBUG=${DEBUG:-""}
+DEBUG=${DEBUG:-"1"}
 if [ ! -z $DEBUG ];then
   dbg_msg="Check /var/log/messages for errors."
 else
@@ -10,115 +14,112 @@ else
 fi
 
 device_addr=$1
+device_name=$(hcitool name $device_addr)
 own_name=$(basename $0)
-basedir=${basedir:-/mnt}
-dir=${basedir}/$device_addr
+basedir=${basedir:-/root/.gvfs}
+dir=${basedir}
 browser=${browser:-"xdg-open"}
-cleanup_script="#!/bin/bash\n
-#cleanup bluetooth mount directories on shutdown / restart\n\n\
-fusermount -uz $dir\n
-rm -rf $dir\nrm /etc/rc.d/rc0.d/$device_addr-cleanup.sh 1>/dev/null 2>/dev/null\n&\
-rm /etc/rc.d/rc6.d/$device_addr-cleanup.sh 1>/dev/null 2>/dev/null"
-
-count=0
+progress_bar_counter=0
+max_tries=5
 
 # Check for kdialog
 
-if which kdialog 1>/dev/null 2>/dev/null; then
-    messagetype="kdialog"
+if which kdialog3 1>/dev/null 2>/dev/null; then
+  messagetype="kdialog"
 else
-    messagetype="gtkdialog"
-    export p_file="progress.tmp"
-    export m_file="message.tmp"
-    touch $p_file
-    touch $m_file
-    echo "0" > $p_file 
+  messagetype="gtkdialog"
+  export p_file="progress.tmp"
+  export m_file="message.tmp"
+  touch $p_file
+  touch $m_file
+  echo "0" > $p_file 
 fi
 
-# fix broken pipe when unexpected error occurs
+# Fix broken pipe when canceled
 
 trap killscript INT
 
 killscript()
 {
-    echo "Initializing clean shutdown......"
-    echo "100" > $p_file # kill gtk window
-    exit 0 # kill script
+  rm ./*.tmp
+  exit 0 
 }
 
-#gtkdialog abstraction
+# Gtkdialog abstraction
 
 gtkbox_interactive() {
   export messagebox='
-    <vbox>
-    <frame Blueman Open Device.>
-      <text>
-	<label>Mounting Bluetooth Devive ..</label>
-      </text>
-      <progressbar>
-	<input>progress p_file</input>  
-	<action type="exit">Done.</action>
-      </progressbar>
-     </frame>
-    </vbox>
+    <window title="Blueman_open" decorated="false">
+      <vbox>
+	<frame Blueman Open Device.>
+	  <text>
+	    <label>Mounting Bluetooth Devive ..</label>
+	  </text>
+	  <progressbar>
+	    <input>progress p_file</input>  
+	    <action type="exit">done</action>
+	  </progressbar>
+	</frame>
+      </vbox>
+    </window>
     '
 }
+
 gtkmessage() {
-	I=$IFS; IFS=""
-	for STATEMENT in $(gtkdialog --center --program=messagebox); do
-		eval $STATEMENT
-	done
-	IFS=$I
+  I=$IFS; IFS=""
+  for STATEMENT in $(gtkdialog --center --program=messagebox); do
+    eval $STATEMENT
+  done
+  IFS=$I
 }
 
-#gtkdialog progress counter
+# Gtkdialog progress control loop
 
 if [ "$messagetype" = "gtkdialog" ]; then
   progress(){
     while :
     do
-      sleep 0.3
       percentage=$(cat $p_file) 
       text=$(cat $m_file)
       echo $percentage
       echo $text
       if [ $percentage = 100 ]; then
-	rm *.tmp
-	exit 0
+	killscript
+	break
       fi
+      sleep 0.3
    done
   }
 
   message(){
-      echo $MSG_TXT > $m_file
+    echo $MSG_TXT > $m_file
   }
+  export -f progress killscript
 fi
 
 
-export -f progress
-
 # End gtkdialog abstraction
 
-# mount function
+# Mount function
 
 mount_device ()
 {
-  i=0
-  LIMIT=5
-  while [ $i -lt $LIMIT ]
+  loop=0
+  while [ $loop -lt $max_tries ]
   do
-    let count=$count+17 
-    echo "$count" > $p_file
-    printf "$i "
-    [ ! -z $DEBUG ] && logger -i -t $own_name "Perform $i try to mount device $device_addr to $dir using obexfs"
-    [ ! -z $DEBUG ] && logger -i -t $own_name "Execute: obexfs -b $device_addr -B 10 $dir"
-    out=$(obexfs -b $device_addr $dir 2>&1)
+    if [ "$messagetype" = "gtkdialog" ]; then
+      let progress_bar_counter=$progress_bar_counter+17 
+      echo $progress_bar_counter > $p_file
+    fi
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Perform $loop try to mount device $device_name to $dir using gvfs."
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Execute: gvfs-mount obex://["$device_addr"]"
+    out=$(gvfs-mount obex://["$device_addr"] 2>&1)
     [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
-    mounts=$(grep $dir /proc/mounts | wc -l)
-    [ ! -z $DEBUG ] && logger -i -t $own_name "Found $mounts mounted $dir inside /proc/mounts"
+    mounts=$(ls $dir | grep $device_name)
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Found $mounts mounted inside $dir"
     
-    if [ $mounts -ne 0 ] ;then
-      MSG_TXT="Successfully mounted $device_addr to $dir"
+    if [ "$mounts" = "$device_name" ] ;then
+      MSG_TXT="Successfully mounted $device_name to $dir"
       if [ $messagetype == "kdialog" ]; then
 	kdialog --passivepopup "$MSG_TXT" 2
       elif [ $messagetype == "gtkdialog" ]; then
@@ -127,73 +128,60 @@ mount_device ()
 	sleep 2
 	echo "100" > $p_file
       fi
-      [ ! -z $DEBUG ] && logger -i -t $own_name "Open $dir with $browser"
-      out=$($browser $dir 2>&1)
+      [ ! -z $DEBUG ] && logger -i -t $own_name "Open $dir/$device_name with $browser"
+      out=$($browser $dir/$device_name 2>&1)
       [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
-      # setup cleanup script
-      echo -e $cleanup_script > /etc/rc.d/rc0.d/$device_addr-cleanup.sh
-      chmod +x /etc/rc.d/rc0.d/$device_addr-cleanup.sh
-      ln -s /etc/rc.d/rc0.d/$device_addr-cleanup.sh /etc/rc.d/rc6.d/$device_addr-cleanup.sh
       exit 0
     else
-      logger -i -t $own_name "Failed to mount $device_addr to $dir from try $i "
+      [ ! -z $DEBUG ] && logger -i -t $own_name "Failed to mount $device_name to $dir/$device_name from try $loop "
+      if [ $loop -ne 4 ]; then
+	MSG_TXT="Attempt $loop to mount $device_name to $dir failed. Retrying, please wait ..."
+      else
+	MSG_TXT="Failed to mount $device_name to $dir. $dbg_msg"
+	sleep 3
+	echo "100" > $p_file
+      fi
+      if [ $messagetype == "kdialog" ]; then
+        kdialog --passivepopup "$MSG_TXT" 3
+      elif [ $messagetype == "gtkdialog" ]; then
+        message $"$MSG_TXT"
+      fi
     fi
-    sleep 1
-    ((i += 1))
+    sleep 2
+    ((loop += 1))
   done
-  if [ $mounts -eq 0 ] ;then
-    MSG_TXT="Failed to mount $device_addr to $dir. $dbg_msg"
-    if [ $messagetype == "kdialog" ]; then
-      kdialog --passivepopup "$MSG_TXT" 4
-    elif [ $messagetype == "gtkdialog" ]; then
-      message $"$MSG_TXT"
-      echo "99" > $p_file
-      sleep 4
-      echo "100" > $p_file
-    fi
-  fi
 }
 
-# unmount function
+# Unmount function
 
 umount_device ()
 {
-  mounts=$(grep $dir /proc/mounts | wc -l)
-  if [ $mounts -ne 0 ] ;then
-    [ ! -z $DEBUG ] && logger -i -t $own_name "Perform umount of $dir if it's already mounted."
-    out=$(fusermount -uz $dir 2>&1)
+  mounts=$(ls $dir | grep $device_name)
+  if [ "$mounts" = "$device_name" ] ;then
+    [ ! -z $DEBUG ] && logger -i -t $own_name "Performing umount of $dir/$device_name."
+    out=$(gvfs-mount -u obex://[$device_addr] 2>&1)
     [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
-    mounts=$(cat /proc/mounts |grep $dir|wc -l)
-      if [ $mounts -eq 0 ] ;then
-        [ ! -z $DEBUG ] && logger -i -t $own_name "Successfully unmounted $dir."
-      else
-        logger -i -t $own_name "$dir is already mounted.  Failed to umount $dir.$out.  Please perform its umount manually."
-        MSG_TXT="Failed to umount $dir - $dbg_msg"
-	if [ $messagetype == "kdialog" ]; then
-	  kdialog --passivepopup "$MSG_TXT" 4
-	elif [ $messagetype == "gtkdialog" ]; then
-	  message $"$MSG_TXT"
-	  echo "99" > $p_file
-	  sleep 4
-	  count=5
-	fi
-        exit
+    if [ -d $dir/$device_name ] ;then
+      [ ! -z $DEBUG ] && logger -i -t $own_name "$device_name failed to unmount. Please perform its umount manually."
+      MSG_TXT="Failed to umount $dir - $dbg_msg"
+      if [ $messagetype == "kdialog" ]; then
+	kdialog --passivepopup "$MSG_TXT" 3
+      elif [ $messagetype == "gtkdialog" ]; then
+	message $"$MSG_TXT"
+	echo "99" > $p_file
+	rm ./*.tmp
+	echo "100" > $p_file
+	exit 1
       fi
+    else
+      [ ! -z $DEBUG ] && logger -i -t $own_name "Successfully unmounted $device_name."
+    fi
   else
     [ ! -z $DEBUG ] && logger -i -t $own_name "$dir is not mounted - no need to perform umount..."
   fi
 }
 
-# mkdir function
-
-create_dir ()
-{
-  [ ! -z $DEBUG ] && logger -i -t $own_name "Create directory $dir to mount the device by bluetooth..."
-  out=$(mkdir -p $dir 2>&1)
-  [ ! -z $DEBUG ] && logger -i -t $own_name "$out"
-}
-
-#main
+# Main
 
 MSG_TXT="Mount device is in progress... Please wait..."
 if [ $messagetype == "kdialog" ]; then
@@ -204,7 +192,6 @@ elif [ $messagetype == "gtkdialog" ]; then
   gtkmessage&
 fi
 
-create_dir
 umount_device
-mount_device
+mount_device 
 
