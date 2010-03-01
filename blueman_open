@@ -3,9 +3,6 @@
 # by Zarren Spry & Robby Workman
 
 
-
-# varables
-
 DEBUG=${DEBUG:-"1"}
 if [ ! -z $DEBUG ];then
   dbg_msg="Check /var/log/messages for errors."
@@ -19,98 +16,21 @@ own_name=$(basename $0)
 basedir=${basedir:-$HOME/.gvfs}
 dir=${basedir}
 browser=${browser:-"xdg-open"}
-progress_bar_counter=0
 max_tries=5
 
 # Check for kdialog
-
-if which kdialog3 1>/dev/null 2>/dev/null; then
+if which kdialog 1>/dev/null 2>/dev/null; then
   messagetype="kdialog"
 else
-  messagetype="gtkdialog"
-  export p_file="progress.tmp"
-  export m_file="message.tmp"
-  touch $p_file
-  touch $m_file
-  echo "0" > $p_file 
+  messagetype="libnotify"
 fi
-
-# Fix broken pipe when canceled
-
-trap killscript INT
-
-killscript()
-{
-  rm ./*.tmp
-  exit 0 
-}
-
-# Gtkdialog abstraction
-
-gtkbox_interactive() {
-  export messagebox='
-    <window title="Blueman_open" decorated="false">
-      <vbox>
-	<frame Blueman Open Device.>
-	  <text>
-	    <label>Mounting Bluetooth Devive ..</label>
-	  </text>
-	  <progressbar>
-	    <input>progress p_file</input>  
-	    <action type="exit">done</action>
-	  </progressbar>
-	</frame>
-      </vbox>
-    </window>
-    '
-}
-
-gtkmessage() {
-  I=$IFS; IFS=""
-  for STATEMENT in $(gtkdialog --center --program=messagebox); do
-    eval $STATEMENT
-  done
-  IFS=$I
-}
-
-# Gtkdialog progress control loop
-
-if [ "$messagetype" = "gtkdialog" ]; then
-  progress(){
-    while :
-    do
-      percentage=$(cat $p_file) 
-      text=$(cat $m_file)
-      echo $percentage
-      echo $text
-      if [ $percentage = 100 ]; then
-	killscript
-	break
-      fi
-      sleep 0.3
-   done
-  }
-
-  message(){
-    echo $MSG_TXT > $m_file
-  }
-  export -f progress killscript
-fi
-
-
-# End gtkdialog abstraction
 
 # Mount function
-
 mount_device ()
 {
   loop=0
   while [ $loop -lt $max_tries ]
   do
-    if [ "$messagetype" = "gtkdialog" ]; then
-      let progress_bar_counter=$progress_bar_counter+17 
-      echo $progress_bar_counter > $p_file
-    fi
     [ ! -z $DEBUG ] && logger -i -t $own_name "Perform $loop try to mount device $device_name to $dir using gvfs."
     [ ! -z $DEBUG ] && logger -i -t $own_name "Execute: gvfs-mount obex://["$device_addr"]"
     out=$(gvfs-mount obex://["$device_addr"] 2>&1)
@@ -122,11 +42,8 @@ mount_device ()
       MSG_TXT="Successfully mounted $device_name to $dir"
       if [ $messagetype == "kdialog" ]; then
 	kdialog --passivepopup "$MSG_TXT" 2
-      elif [ $messagetype == "gtkdialog" ]; then
-	message $"$MSG_TXT"
-	echo "99" > $p_file
-	sleep 2
-	echo "100" > $p_file
+      elif [ $messagetype == "libnotify" ]; then
+	notify-send --expire-time=20000 --icon=blueman "$MSG_TXT"
       fi
       [ ! -z $DEBUG ] && logger -i -t $own_name "Open $dir/$device_name with $browser"
       out=$($browser $dir/$device_name 2>&1)
@@ -138,13 +55,11 @@ mount_device ()
 	MSG_TXT="Attempt $loop to mount $device_name to $dir failed. Retrying, please wait ..."
       else
 	MSG_TXT="Failed to mount $device_name to $dir. $dbg_msg"
-	sleep 3
-	echo "100" > $p_file
       fi
       if [ $messagetype == "kdialog" ]; then
         kdialog --passivepopup "$MSG_TXT" 3
-      elif [ $messagetype == "gtkdialog" ]; then
-        message $"$MSG_TXT"
+      elif [ $messagetype == "libnotify" ]; then
+        notify-send --expire-time=20000 --icon=blueman "$MSG_TXT"
       fi
     fi
     sleep 2
@@ -153,7 +68,6 @@ mount_device ()
 }
 
 # Unmount function
-
 umount_device ()
 {
   mounts=$(ls $dir | grep $device_name)
@@ -166,12 +80,8 @@ umount_device ()
       MSG_TXT="Failed to umount $dir - $dbg_msg"
       if [ $messagetype == "kdialog" ]; then
 	kdialog --passivepopup "$MSG_TXT" 3
-      elif [ $messagetype == "gtkdialog" ]; then
-	message $"$MSG_TXT"
-	echo "99" > $p_file
-	rm ./*.tmp
-	echo "100" > $p_file
-	exit 1
+      elif [ $messagetype == "libnotify" ]; then
+	notify-send --expire-time=20000 --icon=blueman "$MSG_TXT"
       fi
     else
       [ ! -z $DEBUG ] && logger -i -t $own_name "Successfully unmounted $device_name."
@@ -182,14 +92,11 @@ umount_device ()
 }
 
 # Main
-
 MSG_TXT="Mount device is in progress... Please wait..."
 if [ $messagetype == "kdialog" ]; then
   kdialog --passivepopup "$MSG_TXT" 4
-elif [ $messagetype == "gtkdialog" ]; then
-  message $"$MSG_TXT"
-  gtkbox_interactive
-  gtkmessage&
+elif [ $messagetype == "libnotify" ]; then
+  notify-send --expire-time=20000 --icon=blueman "$MSG_TXT"
 fi
 
 umount_device
